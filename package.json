@@ -1,0 +1,40 @@
+{
+  "name": "whatsapp-ai-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal WhatsApp AI bot with tool-calling (email + reminders) running on Raspberry Pi",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:logs": "pm2 logs wab",
+    "pm2:restart": "pm2 restart wab",
+    "pm2:stop": "pm2 stop wab"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.24",
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.6.1",
+    "groq-sdk": "^0.16.0",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.10.1",
+    "pino": "^9.14.0",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^20.19.43",
+    "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^6.4.24",
+    "@types/qrcode-terminal": "^0.12.2",
+    "typescript": "^5.9.3"
+  }
+}
