@@ -1,93 +1,71 @@
-# WhatsApp AI Bot
+# Akrush — WhatsApp Farmer Helpline
 
-A personal WhatsApp AI assistant running on a Raspberry Pi 4. Talks to you on WhatsApp, knows who you are via a `profile.md` system prompt, and can use tools (send email, set reminders).
+An agricultural helpline chatbot on WhatsApp. Farmers send text, voice notes, or photos of crops in any Indian language — **Sarvam AI** handles all language work (detection, translation, speech) and **Gemini** answers the query. Akrush replies in the farmer's own language, as text and a voice note.
+
+## Features
+
+- **Multilingual text**: farmer's message auto-detected + translated to English (Sarvam Mayura, 12 languages w/ auto-detect)
+- **Voice notes in**: WhatsApp voice notes → Sarvam Saaras speech-to-text (direct translation to English, 22 languages)
+- **Voice notes out**: replies synthesized by Sarvam Bulbul TTS and sent as PTT voice notes (11 languages)
+- **Crop photo diagnosis**: photo (with or without caption) → Gemini vision → likely problem, next steps, KVK dosage disclaimer
+- **Per-farmer memory**: language, village, crops, land size, soil, irrigation stored in SQLite (agent saves facts automatically via `update_farmer_profile` tool)
+- **Reminders**: crop-stage, irrigation, spray, and task reminders (node-cron + SQLite)
+- **Email escalation**: forward unresolved queries to an expert/agronomist (Nodemailer)
 
 ## Stack
 
 | Layer | Choice |
 |-------|--------|
 | WhatsApp | [Baileys](https://github.com/WhiskeySockets/Baileys) |
-| AI brain | [Groq](https://groq.com) + Llama 3.3 70B (free tier) |
-| Email | Nodemailer + Gmail App Password |
+| Translation | [Sarvam Translate](https://docs.sarvam.ai) (`mayura:v1`, auto-detect) |
+| Speech-to-text | Sarvam `saaras:v3` (`mode=translate` → English) |
+| Text-to-speech | Sarvam `bulbul:v3` (WAV → ffmpeg OGG/Opus for WhatsApp) |
+| AI brain | [Gemini 2.5 Flash](https://ai.google.dev) (tool-calling + vision) |
 | Reminders | node-cron + SQLite |
 | Memory | SQLite (better-sqlite3) |
-| Runtime | Node.js 20 + TypeScript (ESM) |
+| Audio conversion | ffmpeg-static |
+| Runtime | Node.js 20+ + TypeScript (ESM) |
 | Process | PM2 (auto-restart on crash / on boot) |
+
+## Pipeline
+
+```
+Farmer (text/voice/photo, any Indian language)
+  → Sarvam: detect + translate to English (voice: saaras:v3 mode=translate)
+  → Gemini: answer with tools (reminders, farmer profile, email)
+  → Sarvam: translate reply back to farmer's language
+  → Farmer receives: text + voice note (bulbul:v3)
+```
 
 ## Prerequisites
 
-You'll need:
-
-- A **Raspberry Pi 4** (4GB RAM is fine) running **Pi OS Lite 64-bit**, headless, SSH'd in
-- A **secondary SIM** with WhatsApp installed (do NOT use your main number — automation carries a small ban risk even with anti-spam safeguards)
-- A **Groq API key** — free at <https://console.groq.com/keys>
-- A **Gmail account** with 2FA enabled + an **App Password** — generate one at <https://myaccount.google.com/apppasswords>
-
-## Get the code on the Pi
-
-From this Windows machine (where you scaffolded the project):
-
-```bash
-cd C:\Users\Zaid Mujawar\whatsapp-ai-bot
-git init
-git add .
-git commit -m "init: whatsapp ai bot scaffold"
-# then create an empty GitHub repo and:
-git remote add origin https://github.com/<you>/whatsapp-ai-bot.git
-git push -u origin main
-```
-
-On the Pi:
-
-```bash
-sudo apt update && sudo apt install -y git
-git clone https://github.com/<you>/whatsapp-ai-bot.git
-cd whatsapp-ai-bot
-```
-
-## Install Node 20 (if not already)
-
-```bash
-# Install nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-source ~/.bashrc
-nvm install 20
-nvm use 20
-node -v   # should print v20.x.x
-```
-
-> `better-sqlite3` is a native module — it will compile on the Pi during `npm install`. If it fails, ensure you have build tools:
-> ```bash
-> sudo apt install -y build-essential python3
-> ```
+- Node.js 20+ (`node -v`)
+- API keys:
+  - **Sarvam** (translation + speech) — <https://dashboard.sarvam.ai>
+  - **Gemini** (AI brain) — <https://aistudio.google.com/apikey> (free tier works)
+  - **Gmail App Password** (for the email tool) — enable 2FA, then <https://myaccount.google.com/apppasswords>
+- A **secondary SIM** with WhatsApp installed (do NOT use your main number — automation carries a small ban risk)
 
 ## Configure
 
 ```bash
 cp .env.example .env
-nano .env
+# then edit .env:
 ```
-
-Fill in:
 
 ```env
-GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxx
+SARVAM_API_KEY=sk_xxxxxxxxxxxxxxxx
+GEMINI_API_KEY=AIzaxxxxxxxxxxxxxxxx
 EMAIL_USER=yourbot@gmail.com
-EMAIL_PASS=abcd efgh ijkl mnop     # 16-char Gmail App Password (with or without spaces)
-EMAIL_FROM_NAME=Zaid Bot
-EMAIL_FROM_ADDRESS=yourbot@gmail.com
-OWNER_JID=919876543210@s.whatsapp.net   # your personal WhatsApp number, intl format, no +
-REPLY_DELAY_MIN=5
-REPLY_DELAY_MAX=15
+EMAIL_PASS=abcd efgh ijkl mnop     # 16-char Gmail App Password
+OWNER_JID=919876543210@s.whatsapp.net   # your personal number, intl format, no +
+VOICE_REPLIES=true                 # send voice-note replies (Sarvam TTS)
 ```
 
-Then edit your personal context:
-
-```bash
-nano data/profile.md
-```
-
-Replace the placeholder lines (`Zaid Mujawar`, city, job, interests, timezone) with your real info. The AI sees this whole file as its system prompt.
+Optional:
+- `GEMINI_MODEL` (default `gemini-2.5-flash`)
+- `DEFAULT_LANGUAGE_CODE` (fallback language when detection fails, default `en-IN`)
+- `REPLY_DELAY_MIN/MAX`, `RATE_LIMIT_PER_MIN`, `HISTORY_LIMIT` (anti-spam/context)
 
 ## Build & Run (one-off test)
 
@@ -97,42 +75,57 @@ npm run build
 npm start
 ```
 
-On first run, a QR code prints in the terminal. Open WhatsApp **on the phone with your secondary SIM**, go to Settings → Linked Devices → Link a Device → scan the QR.
+On first run, a QR code prints in the terminal. Open WhatsApp **on the phone with the bot's SIM**, go to Settings → Linked Devices → Link a Device → scan the QR.
 
-Once connected, the bot sits waiting. DM it from your personal phone and say "hi".
+Then DM the bot number from your personal phone:
 
-## Run with PM2 (24/7, auto-restart on boot)
+- A Hindi/Marathi text: *"मेरी फसल में कीड़े लग गए हैं, क्या करूँ?"*
+- A voice note in any Indian language
+- A photo of a sick crop with or without a caption
+- "Remind me tomorrow at 6am to irrigate the field"
+- Replies come back in the farmer's language, as text + voice note
+
+## Deploy on Raspberry Pi 4 (24/7)
+
+4GB RAM is more than enough (bot idles at <200MB).
 
 ```bash
-sudo npm install -g pm2
+# SSH into the Pi, then:
+sudo apt update && sudo apt install -y git build-essential python3
+
+# Install Node 20 via nvm
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.bashrc
+nvm install 20 && nvm use 20
+
+# Get the code
+git clone https://github.com/<you>/whatsapp-ai-bot.git
+cd whatsapp-ai-bot
+cp .env.example .env && nano .env   # fill in keys
+
+# Build & test once
+npm install
 npm run build
+npm start    # scan QR
+
+# Run 24/7 with PM2 (auto-restart on crash + reboot)
+sudo npm install -g pm2
 pm2 start ecosystem.config.cjs
 pm2 save
 pm2 startup systemd        # follow the instructions it prints
-# (usually): sudo env PATH=$PATH:/home/<you>/.nvm/versions/node/v20.x.x/bin pm2 startup systemd -u <you> --hp /home/<you>
-pm2 restart wab            # apply changes after editing code
-pm2 logs wab              # live logs (Ctrl+C to exit)
+pm2 logs wab               # live logs (Ctrl+C to exit)
 ```
 
-## Using it
+Update code later: `git pull && npm install && npm run build && pm2 restart wab`
 
-From your personal WhatsApp, message your secondary SIM:
-
-- "Hey, who are you?"
-- "Email mom@example.com subject 'Dinner plan' body 'Coming at 8'"
-- "Remind me in 5 minutes to check the oven" *(LLM converts to `fireAt`)*
-- "Remind me every weekday at 09:00 to stand up" *(LLM converts to cron `0 9 * * 1-5`)*
+> `data/auth` holds the WhatsApp session — never delete it, or you'll have to re-scan the QR.
 
 ## Anti-spam safeguards (built in)
 
-Per the Reddit advice that motivated this project, the bot:
-
 - **Replies only to incoming messages** — never initiates conversations (except scheduled reminders)
-- **Random reply delay**: 5–15 seconds by default before responding (see `REPLY_DELAY_MIN/MAX`)
-- **Per-chat rate limit**: max 20 messages/min/chat (see `RATE_LIMIT_PER_MIN`)
-- **Ignores group messages unless explicitly `@mentioned`** — won't spam group chats
-
-To stay extra safe, keep message volumes low and avoid sending identical broadcast texts to many different chats.
+- **Random reply delay**: 5–15 seconds before responding (`REPLY_DELAY_MIN/MAX`)
+- **Per-chat rate limit**: max 20 messages/min/chat (`RATE_LIMIT_PER_MIN`)
+- **Group messages ignored unless the bot is `@mentioned`**
 
 ## Project layout
 
@@ -140,55 +133,56 @@ To stay extra safe, keep message volumes low and avoid sending identical broadca
 whatsapp-ai-bot/
 ├── src/
 │   ├── index.ts              # entry, boot sequence, graceful shutdown
-│   ├── whatsapp.ts           # Baileys socket, QR, message handler, rate limit + delay
-│   ├── agent.ts              # Groq tool-calling loop, system prompt assembly
+│   ├── whatsapp.ts           # Baileys socket, QR, message routing (text/voice/image), rate limit + delay
+│   ├── agent.ts              # Gemini tool-calling loop + image-diagnosis agent
 │   ├── config.ts             # env loading
+│   ├── translate/
+│   │   └── sarvam.ts         # Sarvam: translate, STT (voice), TTS (voice replies)
+│   ├── media/
 │   ├── memory/
-│   │   ├── db.ts             # SQLite schema, saveMessage/getHistory
-│   │   └── profile.ts        # loads data/profile.md as system prompt
+│   │   ├── db.ts             # SQLite: messages, reminders, farmer profiles + language
+│   │   └── profile.ts        # loads data/profile.md as the bot persona
 │   ├── tools/
-│   │   ├── registry.ts       # TOOLS array + dispatcher
-│   │   ├── sendEmail.ts      # Nodemailer skill
+│   │   ├── registry.ts       # provider-agnostic tool declarations + dispatcher
+│   │   ├── sendEmail.ts      # Nodemailer (expert escalation)
 │   │   └── setReminder.ts    # persists reminders to SQLite
 │   └── reminders/
-│       └── scheduler.ts      # node-cron manager, pings user via Baileys when due
+│       └── scheduler.ts      # node-cron manager, pings farmer when due
 ├── data/
 │   ├── auth/                 # Baileys session creds (gitignored)
 │   ├── bot.db                # SQLite DB (gitignored)
-│   └── profile.md            # your personal context for the AI
+│   └── profile.md            # Akrush persona / system prompt
 ├── .env.example
-├── .gitignore
 ├── ecosystem.config.cjs      # PM2 process config
 ├── package.json
-├── tsconfig.json
-└── README.md
+└── tsconfig.json
 ```
 
 ## Adding more skills
 
-Each skill is one file in `src/tools/`. Pattern:
+Each skill is one file in `src/tools/`:
 
-1. Create `src/tools/foo.ts` exporting a `foo()` function and a JSON schema.
-2. Register it in `src/tools/registry.ts` `TOOLS` array with its `run` handler.
-3. The agent loop automatically exposes it to the LLM and dispatches calls.
+1. Create `src/tools/foo.ts` exporting a function and a JSON schema (OpenAPI-style).
+2. Register it in `src/tools/registry.ts` `TOOLS` array (schemas are auto-converted to Gemini's format).
+3. The agent loop exposes it to Gemini and dispatches calls.
 
-Good candidates: web search (Brave), weather (OpenWeatherMap), Google Calendar, Home Assistant, expense logger.
+Good candidates: weather (IMD/OpenWeatherMap), mandi prices (Agmarknet), govt-scheme lookup, soil advisory.
 
 ## Troubleshooting
 
-**QR keeps scrolling / not scanning**: terminal width may be too small. Try `qrcode.generate(qr, { small: true })` already enabled; otherwise widen your SSH terminal.
+**Bot not replying**: check `pm2 logs wab`. Common causes — missing `SARVAM_API_KEY`/`GEMINI_API_KEY`, WhatsApp not connected, or a group message without `@mention`.
 
-**`better-sqlite3` install fails**: ensure build tools are present: `sudo apt install -y build-essential python3`.
+**Voice notes play on WhatsApp Web but not on Android**: Android requires OGG/Opus. Replies are converted from WAV with ffmpeg (`ffmpeg-static`, bundled). On the Pi, ffmpeg-static works on ARM too.
 
-**Bot not replying**: check `pm2 logs wab`. Common causes — empty `GROQ_API_KEY`, wrong Gmail App Password, or the message came from a group you weren't `@mentioned` in.
+**Translation failing**: check the Sarvam key and quota (`429` = quota exceeded). The bot falls back to replying in English so the farmer still gets help.
 
-**Logged out of WhatsApp**: if you see `DisconnectReason.loggedOut`, delete the session and re-scan:
+**`better-sqlite3` install fails**: ensure build tools: `sudo apt install -y build-essential python3`.
+
+**Logged out of WhatsApp**: delete the session and re-scan:
 ```bash
-pm2 stop wab
-rm -rf data/auth
-pm2 start wab
+pm2 stop wab && rm -rf data/auth && pm2 start wab
 ```
 
 ## ToS note
 
-Using unofficial WhatsApp libraries (Baileys) technically violates WhatsApp's Terms of Service. Use a secondary SIM, keep volumes low, and don't expect this to be a bulletproof production setup. For commercial use, apply for the [official WhatsApp Business API](https://business.whatsapp.com/developers/developer-hub).
+Using unofficial WhatsApp libraries (Baileys) technically violates WhatsApp's Terms of Service. Use a secondary SIM, keep volumes low, and don't expect this to be a bulletproof production setup. For a real public farmer helpline, apply for the official [WhatsApp Business API](https://business.whatsapp.com/developers/developer-hub).

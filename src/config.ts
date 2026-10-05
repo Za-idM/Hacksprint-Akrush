@@ -15,8 +15,11 @@ function int(key: string, fallback: number): number {
 }
 
 export const config = {
-  groqApiKey: required("GROQ_API_KEY"),
-  groqModel: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+  sarvamApiKey: required("SARVAM_API_KEY"),
+  geminiApiKey: required("GEMINI_API_KEY"),
+  geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  defaultLanguageCode: process.env.DEFAULT_LANGUAGE_CODE || "en-IN",
+  voiceReplies: (process.env.VOICE_REPLIES ?? "true") !== "false",
 
   email: {
     user: required("EMAIL_USER"),

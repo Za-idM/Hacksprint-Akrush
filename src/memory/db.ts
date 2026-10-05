@@ -35,6 +35,13 @@ function migrate(db: Database.Database): void {
       created_ts INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_reminders_active ON reminders(active) WHERE active = 1;
+
+    CREATE TABLE IF NOT EXISTS farmer_profiles (
+      jid TEXT PRIMARY KEY,
+      language_code TEXT NOT NULL DEFAULT 'en-IN',
+      profile_json TEXT NOT NULL DEFAULT '{}',
+      updated_ts INTEGER NOT NULL
+    );
   `);
 }
 
@@ -62,6 +69,44 @@ export function getHistory(chatId: string, limit: number): StoredMessage[] {
       .prepare(`SELECT * FROM messages WHERE chat_id = ? ORDER BY ts DESC LIMIT ?`)
       .all(chatId, limit) as StoredMessage[]
   ).reverse();
+}
+
+export interface FarmerProfile {
+  jid: string;
+  language_code: string;
+  profile_json: string;
+  updated_ts: number;
+}
+
+export function getFarmerProfile(jid: string): FarmerProfile | null {
+  const db = getDb();
+  return (
+    (db.prepare(`SELECT * FROM farmer_profiles WHERE jid = ?`).get(jid) as
+      | FarmerProfile
+      | undefined) ?? null
+  );
+}
+
+export function saveFarmerLanguage(jid: string, languageCode: string): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO farmer_profiles (jid, language_code, profile_json, updated_ts)
+     VALUES (?, ?, '{}', ?)
+     ON CONFLICT(jid) DO UPDATE SET language_code = excluded.language_code, updated_ts = excluded.updated_ts`
+  ).run(jid, languageCode, Date.now());
+}
+
+export function mergeFarmerProfile(jid: string, patch: Record<string, string>): string {
+  const db = getDb();
+  const existing = getFarmerProfile(jid);
+  const current: Record<string, string> = existing ? JSON.parse(existing.profile_json || "{}") : {};
+  const merged = { ...current, ...patch };
+  db.prepare(
+    `INSERT INTO farmer_profiles (jid, language_code, profile_json, updated_ts)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(jid) DO UPDATE SET profile_json = excluded.profile_json, updated_ts = excluded.updated_ts`
+  ).run(jid, existing?.language_code ?? "en-IN", JSON.stringify(merged), Date.now());
+  return JSON.stringify(merged);
 }
 
 export function closeDb(): void {

@@ -9,7 +9,7 @@ async function main() {
     console.warn("[warn] OWNER_JID is empty. Reminders needs it set in .env.");
   }
 
-  console.log(`[boot] Booting ${config.botName} on ${config.groqModel}`);
+  console.log(`[boot] Booting ${config.botName} on ${config.geminiModel}`);
 
   const onReady = () => {
     startScheduler(sendFromScheduler);
